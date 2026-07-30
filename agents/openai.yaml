@@ -1,0 +1,4 @@
+interface:
+  display_name: "BMU_sa SQL"
+  short_description: "Generate safe, accurate BMU_sa SQL queries"
+  default_prompt: "Use $bmu-sa-sql to generate or review a BMU_sa SQL query."

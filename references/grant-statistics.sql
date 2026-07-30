@@ -1,84 +1,98 @@
 /*
 Purpose:
-  Count students with and without confirmed grants by year of study,
+  Count only students supplied through StudentList, grouped by year of study,
   grant percentage/type, and programme type.
 
 Verified report scope:
-  - AcademicYearID = 6
-  - Student StatusID IN (1, 12)
+  - Student population comes exclusively from StudentList
+  - No Students.StatusID filter is applied
   - Active programme enrolment: spe.StatusID = 1
   - Excluded programme: spe.ProgramID = 18
+  - Confirmed grants from AcademicYearID = 6
   - Excluded grant percentage: FIX
+
+Privacy:
+  Do not commit the real StudentID list to a public repository.
 */
 
-WITH StudentWithGrants AS
+;WITH StudentList (StudentID) AS
+(
+    -- Insert the approved StudentIDs at runtime.
+    -- Example:
+    SELECT v.StudentID
+    FROM
+    (
+        VALUES
+            ('example-student-id')
+    ) AS v(StudentID)
+),
+EligibleStudents AS
 (
     SELECT DISTINCT
-        g.StudentID
-    FROM BMU_sa.Grants AS g
+        sl.StudentID,
+        s.YearOfStudy,
+        pt.ProgramTypeName
+    FROM StudentList AS sl
     INNER JOIN BMU_sa.Students AS s
-        ON s.StudentID = g.StudentID
-    WHERE g.IsConfirmed = 1
-      AND g.AcademicYearID = 6
-      AND s.StatusID IN (1, 12)
-      AND g.Percentage <> 'FIX'
+        ON s.StudentID = sl.StudentID
+    INNER JOIN BMU_sa.StudentProgramEnrolments AS spe
+        ON spe.StudentID = sl.StudentID
+       AND spe.StatusID = 1
+       AND spe.ProgramID <> 18
+    INNER JOIN BMU_sa.Programs AS p
+        ON p.ProgramID = spe.ProgramID
+    INNER JOIN BMU_sa.ProgramTypes AS pt
+        ON pt.ProgramTypeID = p.ProgramTypeID
+),
+StudentWithGrants AS
+(
+    SELECT DISTINCT
+        es.StudentID
+    FROM EligibleStudents AS es
+    INNER JOIN BMU_sa.Grants AS g
+        ON g.StudentID = es.StudentID
+       AND g.IsConfirmed = 1
+       AND g.AcademicYearID = 6
+       AND g.Percentage <> 'FIX'
 )
 -- Students with grants
 SELECT
-    s.YearOfStudy,
+    es.YearOfStudy,
     CAST(g.Percentage AS varchar(50)) AS Percentage,
     g.[Type],
-    pt.ProgramTypeName,
-    COUNT(DISTINCT s.StudentID) AS NumberOfStudents
-FROM BMU_sa.Grants AS g
-INNER JOIN BMU_sa.Students AS s
-    ON s.StudentID = g.StudentID
-INNER JOIN BMU_sa.StudentProgramEnrolments AS spe
-    ON spe.StudentID = s.StudentID
-INNER JOIN BMU_sa.Programs AS p
-    ON p.ProgramID = spe.ProgramID
-INNER JOIN BMU_sa.ProgramTypes AS pt
-    ON pt.ProgramTypeID = p.ProgramTypeID
-WHERE g.IsConfirmed = 1
-  AND g.AcademicYearID = 6
-  AND s.StatusID IN (1, 12)
-  AND g.Percentage <> 'FIX'
-  AND spe.StatusID = 1
-  AND spe.ProgramID <> 18
+    es.ProgramTypeName,
+    COUNT(DISTINCT es.StudentID) AS NumberOfStudents
+FROM EligibleStudents AS es
+INNER JOIN BMU_sa.Grants AS g
+    ON g.StudentID = es.StudentID
+   AND g.IsConfirmed = 1
+   AND g.AcademicYearID = 6
+   AND g.Percentage <> 'FIX'
 GROUP BY
-    s.YearOfStudy,
+    es.YearOfStudy,
     g.Percentage,
     g.[Type],
-    pt.ProgramTypeName
+    es.ProgramTypeName
 
 UNION ALL
 
 -- Students without grants
 SELECT
-    s.YearOfStudy,
+    es.YearOfStudy,
     'No Grant' AS Percentage,
     'No Grant' AS [Type],
-    pt.ProgramTypeName,
-    COUNT(DISTINCT s.StudentID) AS NumberOfStudents
-FROM BMU_sa.Students AS s
-INNER JOIN BMU_sa.StudentProgramEnrolments AS spe
-    ON spe.StudentID = s.StudentID
-INNER JOIN BMU_sa.Programs AS p
-    ON p.ProgramID = spe.ProgramID
-INNER JOIN BMU_sa.ProgramTypes AS pt
-    ON pt.ProgramTypeID = p.ProgramTypeID
-WHERE s.StatusID IN (1, 12)
-  AND spe.StatusID = 1
-  AND spe.ProgramID <> 18
-  AND NOT EXISTS
-  (
-      SELECT 1
-      FROM StudentWithGrants AS swg
-      WHERE swg.StudentID = s.StudentID
-  )
+    es.ProgramTypeName,
+    COUNT(DISTINCT es.StudentID) AS NumberOfStudents
+FROM EligibleStudents AS es
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM StudentWithGrants AS swg
+    WHERE swg.StudentID = es.StudentID
+)
 GROUP BY
-    s.YearOfStudy,
-    pt.ProgramTypeName
+    es.YearOfStudy,
+    es.ProgramTypeName
 ORDER BY
     YearOfStudy,
     ProgramTypeName,
